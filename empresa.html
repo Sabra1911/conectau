@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Panel Empresa | ConectaU</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <nav class="nav">
+    <div class="brand">
+      <div class="logo">CU</div>
+      <div>
+        <h1>ConectaU</h1>
+        <p>Panel de Empresa</p>
+      </div>
+    </div>
+    <div class="nav-actions">
+      <button onclick="cambiarPerfil()" class="btn-primary">Cambiar a Estudiante</button>
+      <button onclick="cerrarSesion()" class="btn-logout">Cerrar sesión</button>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="header">
+      <h2 id="welcomeMessage">Gestión de Vacantes</h2>
+      <div class="header-stats">
+        <div class="stat">
+          <span id="totalVacantes">0</span>
+          <span>Vacantes publicadas</span>
+        </div>
+        <div class="stat">
+          <span id="totalPostulaciones">0</span>
+          <span>Postulaciones recibidas</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="dashboard">
+      <form id="vacanteForm" class="form card">
+        <h3>Publicar Nueva Vacante</h3>
+        <div class="form-group">
+          <input type="text" id="titulo" placeholder="Título del proyecto" required />
+        </div>
+        <div class="form-group">
+          <textarea id="descripcion" placeholder="Descripción detallada del proyecto" rows="4" required></textarea>
+        </div>
+        <div class="form-group">
+          <select id="modalidad" required>
+            <option value="">Selecciona la modalidad</option>
+            <option value="Remoto">Remoto</option>
+            <option value="Presencial">Presencial</option>
+            <option value="Híbrido">Híbrido</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <input type="text" id="ubicacion" placeholder="Ubicación (ciudad o remoto)" required />
+        </div>
+        <div class="form-group">
+          <input type="number" id="pago" placeholder="Pago mensual en COP" required />
+        </div>
+        <div class="form-group">
+          <input type="text" id="habilidades" placeholder="Habilidades requeridas (separadas por coma)" required />
+        </div>
+        <button type="submit" class="btn-primary">Publicar Vacante</button>
+      </form>
+
+      <div id="misVacantes" class="vacantes-grid">
+        <!-- Las vacantes se cargarán aquí -->
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" style="display:none"></div>
+
+  <script type="module">
+    // Import Firebase modules
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+    import { getAuth, signOut } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+    import { 
+      getFirestore, 
+      collection, 
+      addDoc, 
+      getDocs, 
+      query, 
+      where, 
+      orderBy,
+      Timestamp,
+      doc,
+      getDoc,
+      deleteDoc 
+    } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+
+    // Configuración de Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyA9USwOBgrunZQZcBCQFd8Fx0UJTytZ8_s",
+      authDomain: "conectau-16a34.firebaseapp.com",
+      projectId: "conectau-16a34",
+      storageBucket: "conectau-16a34.appspot.com",
+      messagingSenderId: "557099346827",
+      appId: "1:557099346827:web:13509cb4bf9c9921615d8e",
+      measurementId: "G-JSE7B6KR38"
+    };
+
+    // Inicializar Firebase
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Verificar autenticación
+    auth.onAuthStateChanged(async (user) => {
+      if (!user) {
+        window.location.href = 'login.html';
+        return;
+      }
+
+      // Obtener datos de la empresa
+      const userDoc = await getDocs(query(collection(db, 'users'), where('email', '==', user.email)));
+      const empresaData = userDoc.docs[0].data();
+      
+      // Mostrar nombre de la empresa en el header
+      const header = document.querySelector('.header h2');
+      header.textContent = `Panel de ${empresaData.name}`;
+      
+      // Cargar vacantes de la empresa
+      const vacantesQuery = query(
+        collection(db, 'vacantes'),
+        where('empresaId', '==', user.uid),
+        orderBy('fecha', 'desc')
+      );
+      
+      const vacantesSnapshot = await getDocs(vacantesQuery);
+      const vacantesContainer = document.createElement('div');
+      vacantesContainer.className = 'vacantes-grid';
+      
+      if (vacantesSnapshot.empty) {
+        vacantesContainer.innerHTML = '<p class="no-vacantes">No has publicado vacantes aún.</p>';
+      } else {
+        vacantesSnapshot.forEach(doc => {
+          const vacante = doc.data();
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.innerHTML = `
+            <h3>${vacante.titulo}</h3>
+            <p><strong>Descripción:</strong> ${vacante.descripcion}</p>
+            <p><strong>Modalidad:</strong> ${vacante.modalidad}</p>
+            <p><strong>Ubicación:</strong> ${vacante.ubicacion}</p>
+            <p><strong>Pago:</strong> $${vacante.pago.toLocaleString()}</p>
+            <p><strong>Habilidades:</strong> ${vacante.habilidades.join(', ')}</p>
+            <p><strong>Fecha:</strong> ${vacante.fecha.toDate().toLocaleDateString()}</p>
+          `;
+          vacantesContainer.appendChild(card);
+        });
+      }
+      
+      // Insertar el contenedor de vacantes después del formulario
+      const form = document.querySelector('#vacanteForm');
+      form.parentNode.insertBefore(vacantesContainer, form.nextSibling);
+    });
+
+    // Manejar el formulario de vacantes
+    const vacanteForm = document.getElementById('vacanteForm');
+    vacanteForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const submitButton = vacanteForm.querySelector('button[type="submit"]');
+      submitButton.disabled = true;
+      submitButton.textContent = 'Publicando...';
+      
+      try {
+        const user = auth.currentUser;
+        if (!user) throw new Error('Debes iniciar sesión');
+
+        const userData = (await getDocs(query(collection(db, 'users'), where('email', '==', user.email)))).docs[0].data();
+        
+        const vacante = {
+          empresaId: user.uid,
+          empresaNombre: userData.name,
+          titulo: vacanteForm.titulo.value,
+          descripcion: vacanteForm.descripcion.value,
+          modalidad: vacanteForm.modalidad.value,
+          ubicacion: vacanteForm.ubicacion.value,
+          pago: parseInt(vacanteForm.pago.value),
+          habilidades: vacanteForm.habilidades.value.split(',').map(h => h.trim()),
+          fecha: new Date(),
+          estado: 'activa'
+        };
+        
+        await addDoc(collection(db, 'vacantes'), vacante);
+        
+        alert('Vacante publicada exitosamente');
+        vacanteForm.reset();
+        window.location.reload(); // Recargar para mostrar la nueva vacante
+        
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Error al publicar la vacante: ' + error.message);
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = 'Publicar';
+      }
+    });
+
+    // Función de cierre de sesión
+    window.cerrarSesion = async () => {
+      try {
+        await auth.signOut();
+        window.location.href = 'index.html';
+      } catch (error) {
+        console.error('Error al cerrar sesión:', error);
+        alert('Error al cerrar sesión');
+      }
+    };
+  </script>
+</body>
+</html>

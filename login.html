@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login | ConectaU</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Bienvenido a <span class="highlight">ConectaU</span></h1>
+    <form id="loginForm" class="form">
+      <input type="email" id="email" placeholder="Correo institucional" required />
+      <input type="password" id="password" placeholder="Contraseña" required />
+      <button type="submit">Ingresar</button>
+      <p class="login-link">¿No tienes cuenta? <a href="register.html">Regístrate aquí</a></p>
+    </form>
+  </div>
+  <script type="module">
+    // Importar las funciones necesarias de Firebase
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+    import { getFirestore, doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+
+    // Configuración de Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyA9USwOBgrunZQZcBCQFd8Fx0UJTytZ8_s",
+      authDomain: "conectau-16a34.firebaseapp.com",
+      projectId: "conectau-16a34",
+      storageBucket: "conectau-16a34.appspot.com",
+      messagingSenderId: "557099346827",
+      appId: "1:557099346827:web:13509cb4bf9c9921615d8e",
+      measurementId: "G-JSE7B6KR38"
+    };
+
+    // Inicializar Firebase
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Manejar el login
+    const loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+      loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const submitButton = loginForm.querySelector('button[type="submit"]');
+        const email = loginForm.email.value;
+        const password = loginForm.password.value;
+        
+        submitButton.disabled = true;
+        submitButton.textContent = 'Iniciando sesión...';
+        
+        try {
+          // Intentar login
+          const userCredential = await signInWithEmailAndPassword(auth, email, password);
+          
+          // Obtener datos del usuario
+          const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+          
+          if (!userDoc.exists()) {
+            throw new Error('No se encontraron datos del usuario');
+          }
+
+          const userData = userDoc.data();
+          
+          // Actualizar último login
+          await updateDoc(doc(db, 'users', userCredential.user.uid), {
+            lastLogin: new Date()
+          });
+          
+          // Redirigir según el rol
+          window.location.href = userData.role === 'empresa' ? 'empresa.html' : 'dashboard.html';
+          
+        } catch (error) {
+          console.error('Error:', error);
+          let errorMessage = 'Error al iniciar sesión. ';
+          
+          switch(error.code) {
+            case 'auth/user-not-found':
+              errorMessage += 'Usuario no encontrado.';
+              break;
+            case 'auth/wrong-password':
+              errorMessage += 'Contraseña incorrecta.';
+              break;
+            case 'auth/invalid-email':
+              errorMessage += 'Correo electrónico inválido.';
+              break;
+            default:
+              errorMessage += error.message;
+          }
+          
+          alert(errorMessage);
+        } finally {
+          submitButton.disabled = false;
+          submitButton.textContent = 'Ingresar';
+        }
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Panel Estudiante | ConectaU</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="dashboard.css" />
+<body>
+  <nav class="nav">
+    <div class="brand">
+      <div class="logo">CU</div>
+      <div>
+        <h1>ConectaU</h1>
+        <p>Panel de Estudiante</p>
+      </div>
+    </div>
+    <button onclick="cerrarSesion()" class="btn-logout">Cerrar sesión</button>
+  </nav>
+
+  <div class="container">
+    <div class="header">
+      <h2 id="welcomeMessage">Buscando oportunidades...</h2>
+      <div class="header-stats">
+        <div class="stat">
+          <span id="totalVacantes">0</span>
+          <span>Vacantes disponibles</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="filters">
+      <input type="text" id="searchInput" placeholder="Buscar por título, descripción o habilidades..." onkeyup="filtrarVacantes()">
+      <select id="modalidadFilter" onchange="filtrarVacantes()">
+        <option value="">Todas las modalidades</option>
+        <option value="Remoto">Remoto</option>
+        <option value="Presencial">Presencial</option>
+        <option value="Híbrido">Híbrido</option>
+      </select>
+      <select id="salaryFilter" onchange="filtrarVacantes()">
+        <option value="">Todos los rangos salariales</option>
+        <option value="0-500000">$0 - $500,000</option>
+        <option value="500001-1000000">$500,001 - $1,000,000</option>
+        <option value="1000001+">Más de $1,000,000</option>
+      </select>
+    </div>
+
+    <div class="dashboard">
+      <div id="vacantes" class="vacantes-grid"></div>
+    </div>
+
+    <div id="noResults" class="no-results" style="display: none;">
+      <h3>No se encontraron vacantes</h3>
+      <p>Intenta ajustar los filtros de búsqueda o prueba con diferentes palabras clave.</p>
+    </div>
+  </div>
+
+  <div id="toast" style="display:none;position:fixed;right:18px;bottom:18px;background:var(--dark);color:white;padding:10px 14px;border-radius:10px;z-index:80"></div>
+
+  <script type="module">
+    // Import Firebase modules
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+    import { getAuth, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+    import { 
+      getFirestore, 
+      collection, 
+      query, 
+      where, 
+      orderBy, 
+      getDocs, 
+      addDoc, 
+      Timestamp 
+    } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyA9USwOBgrunZQZcBCQFd8Fx0UJTytZ8_s",
+      authDomain: "conectau-16a34.firebaseapp.com",
+      projectId: "conectau-16a34",
+      storageBucket: "conectau-16a34.appspot.com",
+      messagingSenderId: "557099346827",
+      appId: "1:557099346827:web:13509cb4bf9c9921615d8e",
+      measurementId: "G-JSE7B6KR38"
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Global variables
+    let todasLasVacantes = [];
+    const vacantesDiv = document.getElementById('vacantes');
+    const noResults = document.getElementById('noResults');
+    const totalVacantes = document.getElementById('totalVacantes');
+    const welcomeMessage = document.getElementById('welcomeMessage');
+
+    // Show toast notification
+    function showToast(message, type = 'info', duration = 3000) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.className = `toast ${type}`;
+      toast.style.display = 'block';
+      
+      setTimeout(() => {
+        toast.style.display = 'none';
+      }, duration);
+    }
+
+    // Verify authentication and load data
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        window.location.href = 'login.html';
+        return;
+      }
+
+      try {
+        // Load user data
+        const userDoc = await getDocs(query(collection(db, 'users'), where('email', '==', user.email)));
+        if (!userDoc.empty) {
+          const userData = userDoc.docs[0].data();
+          const firstName = userData.name.split(' ')[0];
+          welcomeMessage.textContent = `¡Bienvenido, ${firstName}!`;
+        }
+
+        // Load vacancies
+        await cargarVacantes();
+      } catch (error) {
+        console.error('Error loading user data:', error);
+        showToast('Error al cargar los datos del usuario', 'error');
+      }
+    });
+
+    // Load vacancies
+    async function cargarVacantes() {
+      try {
+        const vacantesQuery = query(
+          collection(db, 'vacantes'),
+          orderBy('fecha', 'desc')
+        );
+        
+        const snapshot = await getDocs(vacantesQuery);
+        todasLasVacantes = snapshot.docs.map(doc => {
+          const data = doc.data();
+          // Ensure fecha is a valid date
+          const fecha = data.fecha instanceof Timestamp ? 
+            data.fecha.toDate() : 
+            (data.fecha ? new Date(data.fecha) : new Date());
+          
+          return {
+            id: doc.id,
+            ...data,
+            fecha,
+            habilidades: Array.isArray(data.habilidades) ? data.habilidades : [],
+            pago: typeof data.pago === 'number' ? data.pago : 0
+          };
+        });
+        
+        totalVacantes.textContent = todasLasVacantes.length;
+        filtrarVacantes();
+      } catch (error) {
+        console.error('Error al cargar vacantes:', error);
+        showToast('Error al cargar las vacantes. ' + error.message, 'error');
+      }
+    }
+
+    // Filter vacancies
+    window.filtrarVacantes = () => {
+      const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+      const modalidad = document.getElementById('modalidadFilter').value;
+      const salaryRange = document.getElementById('salaryFilter').value;
+      
+      const vacantesFiltradas = todasLasVacantes.filter(v => {
+        const matchSearch = v.titulo.toLowerCase().includes(searchTerm) ||
+                          v.descripcion.toLowerCase().includes(searchTerm) ||
+                          v.habilidades.some(h => h.toLowerCase().includes(searchTerm));
+        
+        const matchModalidad = !modalidad || v.modalidad === modalidad;
+        
+        let matchSalary = true;
+        if (salaryRange) {
+          const [min, max] = salaryRange.split('-').map(Number);
+          matchSalary = max ? (v.pago >= min && v.pago <= max) : (v.pago >= min);
+        }
+        
+        return matchSearch && matchModalidad && matchSalary;
+      });
+      
+      mostrarVacantes(vacantesFiltradas);
+    };
+
+    // Display vacancies
+    function mostrarVacantes(vacantes) {
+      vacantesDiv.innerHTML = '';
+      
+      if (vacantes.length === 0) {
+        noResults.style.display = 'block';
+        return;
+      }
+      
+      noResults.style.display = 'none';
+      
+      vacantes.forEach(v => {
+        const vacanteElement = document.createElement('div');
+        vacanteElement.className = 'vacante';
+        
+        // Format salary
+        const salarioFormateado = v.pago.toLocaleString('es-MX', {
+          style: 'currency',
+          currency: 'MXN',
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0
+        });
+        
+        // Format date
+        const fecha = v.fecha instanceof Timestamp ? v.fecha.toDate() : new Date(v.fecha);
+        const fechaFormateada = new Intl.DateTimeFormat('es-MX', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric'
+        }).format(fecha);
+        
+        vacanteElement.innerHTML = `
+          <div class="vacante-header">
+            <h3 class="vacante-title">${v.titulo}</h3>
+            <p class="vacante-company">${v.empresaNombre || 'Empresa Confidencial'}</p>
+          </div>
+          
+          <div class="vacante-tags">
+            <span class="tag tag-modalidad">${v.modalidad}</span>
+            <span class="tag tag-salary">${salarioFormateado}</span>
+          </div>
+          
+          <p class="vacante-description">${v.descripcion}</p>
+          
+          <div class="vacante-skills">
+            ${v.habilidades.map(skill => `<span class="skill">${skill}</span>`).join('')}
+          </div>
+
+          <button onclick="postular('${v.id}')" class="btn-postular">Postularme a esta vacante</button>
+        `;
+        
+        vacantesDiv.appendChild(vacanteElement);
+      });
+    }
+
+    // Apply for a vacancy
+    window.postular = async (vacanteId) => {
+      try {
+        const user = auth.currentUser;
+        if (!user) {
+          showToast('Debes iniciar sesión para postularte', 'warning');
+          return;
+        }
+        
+        // Check if already applied
+        const postulacionesQuery = query(
+          collection(db, 'postulaciones'),
+          where('estudianteId', '==', user.uid),
+          where('vacanteId', '==', vacanteId)
+        );
+        
+        const postulacionesSnapshot = await getDocs(postulacionesQuery);
+        if (!postulacionesSnapshot.empty) {
+          showToast('Ya te has postulado a esta vacante', 'info');
+          return;
+        }
+        
+        // Create new application
+        await addDoc(collection(db, 'postulaciones'), {
+          vacanteId,
+          estudianteId: user.uid,
+          fecha: new Date(),
+          estado: 'pendiente'
+        });
+        
+        showToast('¡Postulación enviada con éxito!', 'success');
+      } catch (error) {
+        console.error('Error:', error);
+        showToast('Error al enviar la postulación', 'error');
+      }
+    };
+
+    // Sign out
+    window.cerrarSesion = async () => {
+      try {
+        await signOut(auth);
+        window.location.href = 'login.html';
+      } catch (error) {
+        console.error('Error al cerrar sesión:', error);
+        showToast('Error al cerrar sesión', 'error');
+      }
+    };
+  </script>
+</body>
+</html>

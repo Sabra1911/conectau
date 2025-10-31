@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Registro | ConectaU</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Regístrate en <span class="highlight">ConectaU</span></h1>
+    <form id="registerForm" class="form">
+      <input type="text" id="name" placeholder="Nombre completo" required />
+      <input type="email" id="email" placeholder="Correo institucional" required />
+      <input type="password" id="password" placeholder="Contraseña" required />
+      <input type="text" id="university" placeholder="Universidad" required />
+      <input type="text" id="career" placeholder="Carrera" required />
+      <input type="number" step="0.1" id="gpa" placeholder="GPA (ej. 4.2)" required />
+      <input type="text" id="skills" placeholder="Habilidades (separadas por coma)" required />
+      <select id="role" required>
+        <option value="">Selecciona tu rol</option>
+        <option value="estudiante">Estudiante</option>
+        <option value="empresa">Empresa</option>
+      </select>
+      <button type="submit">Crear cuenta</button>
+      <p class="login-link">¿Ya tienes cuenta? <a href="login.html">Inicia sesión</a></p>
+    </form>
+  </div>
+  <script type="module">
+    // Importar las funciones necesarias de Firebase
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+    import { getAuth, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+
+    // Configuración de Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyA9USwOBgrunZQZcBCQFd8Fx0UJTytZ8_s",
+      authDomain: "conectau-16a34.firebaseapp.com",
+      projectId: "conectau-16a34",
+      storageBucket: "conectau-16a34.appspot.com",
+      messagingSenderId: "557099346827",
+      appId: "1:557099346827:web:13509cb4bf9c9921615d8e",
+      measurementId: "G-JSE7B6KR38"
+    };
+
+    // Inicializar Firebase
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Manejar el registro
+    const registerForm = document.getElementById('registerForm');
+    if (registerForm) {
+      registerForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const submitButton = registerForm.querySelector('button[type="submit"]');
+        submitButton.disabled = true;
+        submitButton.textContent = 'Creando cuenta...';
+        
+        try {
+          // Validar contraseña
+          const password = registerForm.password.value;
+          if (password.length < 6) {
+            throw new Error('La contraseña debe tener al menos 6 caracteres');
+          }
+
+          // Crear objeto con datos del usuario
+          const userData = {
+            name: registerForm.name.value,
+            email: registerForm.email.value,
+            university: registerForm.university.value,
+            career: registerForm.career.value,
+            gpa: parseFloat(registerForm.gpa.value),
+            skills: registerForm.skills.value.split(',').map(s => s.trim()),
+            role: registerForm.role.value,
+            createdAt: new Date(),
+            lastLogin: null
+          };
+
+          // Crear usuario en Firebase Auth
+          const userCredential = await createUserWithEmailAndPassword(auth, userData.email, password);
+          
+          // Guardar datos adicionales en Firestore
+          await setDoc(doc(db, 'users', userCredential.user.uid), userData);
+          
+          // Mostrar mensaje de éxito y redirigir
+          alert('Registro exitoso. Por favor, inicia sesión.');
+          window.location.href = 'login.html';
+          
+        } catch (error) {
+          console.error('Error:', error);
+          alert(error.message || 'Error al crear la cuenta');
+        } finally {
+          submitButton.disabled = false;
+          submitButton.textContent = 'Crear cuenta';
+        }
+      });
+    }
+  </script>
+</body>
