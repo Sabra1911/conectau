@@ -11,14 +11,20 @@
 <body>
   <nav class="nav">
     <div class="brand">
-      <div class="logo">CU</div>
+      <div class="logo"><img src="logo.png" alt="ConectaU" /></div>
       <div>
         <h1>ConectaU</h1>
         <p>Panel de Estudiante</p>
       </div>
     </div>
-    <button onclick="cerrarSesion()" class="btn-logout">Cerrar sesión</button>
+    <div class="nav-actions">
+      <button onclick="cambiarPerfil()" class="btn-primary">Cambiar a Empresa</button>
+      <button onclick="cerrarSesion()" class="btn-logout">Cerrar sesión</button>
+    </div>
   </nav>
+
+  <!-- shared helpers -->
+  <script src="shared.js"></script>
 
   <div class="container">
     <div class="header">
@@ -27,6 +33,10 @@
         <div class="stat">
           <span id="totalVacantes">0</span>
           <span>Vacantes disponibles</span>
+        </div>
+        <div class="stat">
+          <span id="totalPostulaciones">0</span>
+          <span>Postulaciones realizadas</span>
         </div>
       </div>
     </div>
@@ -59,6 +69,9 @@
 
   <div id="toast" style="display:none;position:fixed;right:18px;bottom:18px;background:var(--dark);color:white;padding:10px 14px;border-radius:10px;z-index:80"></div>
 
+  <!-- Modal placeholder for confirmations -->
+  <div id="cuModal" style="display:none"></div>
+
   <script type="module">
     // Import Firebase modules
     import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
@@ -71,7 +84,11 @@
       orderBy, 
       getDocs, 
       addDoc, 
-      Timestamp 
+      Timestamp,
+      doc,
+      updateDoc,
+      getDoc,
+      onSnapshot
     } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
 
     // Firebase configuration
@@ -90,11 +107,14 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    // Global variables
-    let todasLasVacantes = [];
+  // Global variables
+  let todasLasVacantes = [];
+  // Map of vacanteId -> postulacion data for the current user
+  let misPostulacionesMap = {};
     const vacantesDiv = document.getElementById('vacantes');
     const noResults = document.getElementById('noResults');
     const totalVacantes = document.getElementById('totalVacantes');
+  const totalPostulaciones = document.getElementById('totalPostulaciones');
     const welcomeMessage = document.getElementById('welcomeMessage');
 
     // Show toast notification
@@ -125,8 +145,33 @@
           welcomeMessage.textContent = `¡Bienvenido, ${firstName}!`;
         }
 
-        // Load vacancies
-        await cargarVacantes();
+        // Suscribirse a las postulaciones del usuario (actualiza contador en tiempo real)
+        try {
+          const postulQuery = query(collection(db, 'postulaciones'), where('estudianteId', '==', user.uid));
+          onSnapshot(postulQuery, snapshot => {
+            totalPostulaciones.textContent = snapshot.size;
+            // rebuild map of vacanteId -> postulacion (if multiple for same vacante, keep the latest)
+            misPostulacionesMap = {};
+            snapshot.docs.forEach(d => {
+              const pd = d.data();
+              // store by vacanteId
+              if (pd && pd.vacanteId) {
+                // prefer the most recent by fecha if collision
+                const existing = misPostulacionesMap[pd.vacanteId];
+                if (!existing || (pd.fecha && existing.fecha && pd.fecha.toMillis && pd.fecha.toMillis() > existing.fecha.toMillis())) {
+                  misPostulacionesMap[pd.vacanteId] = { id: d.id, ...pd };
+                }
+              }
+            });
+            // refresh visible vacancies so applied state updates
+            filtrarVacantes();
+          });
+        } catch (e) {
+          console.warn('No se pudo subscribir a postulaciones del usuario', e);
+        }
+
+        // Load vacancies in real-time
+        cargarVacantes();
       } catch (error) {
         console.error('Error loading user data:', error);
         showToast('Error al cargar los datos del usuario', 'error');
@@ -136,30 +181,27 @@
     // Load vacancies
     async function cargarVacantes() {
       try {
-        const vacantesQuery = query(
-          collection(db, 'vacantes'),
-          orderBy('fecha', 'desc')
-        );
-        
-        const snapshot = await getDocs(vacantesQuery);
-        todasLasVacantes = snapshot.docs.map(doc => {
-          const data = doc.data();
-          // Ensure fecha is a valid date
-          const fecha = data.fecha instanceof Timestamp ? 
-            data.fecha.toDate() : 
-            (data.fecha ? new Date(data.fecha) : new Date());
-          
-          return {
-            id: doc.id,
-            ...data,
-            fecha,
-            habilidades: Array.isArray(data.habilidades) ? data.habilidades : [],
-            pago: typeof data.pago === 'number' ? data.pago : 0
-          };
+        const vacantesQuery = query(collection(db, 'vacantes'), orderBy('fecha', 'desc'));
+        // Realtime listener
+        onSnapshot(vacantesQuery, snapshot => {
+          todasLasVacantes = snapshot.docs.map(doc => {
+            const data = doc.data();
+            const fecha = data.fecha instanceof Timestamp ? data.fecha.toDate() : (data.fecha ? new Date(data.fecha) : new Date());
+            return {
+              id: doc.id,
+              ...data,
+              fecha,
+              habilidades: Array.isArray(data.habilidades) ? data.habilidades : [],
+              pago: typeof data.pago === 'number' ? data.pago : 0
+            };
+          });
+
+          totalVacantes.textContent = todasLasVacantes.length;
+          filtrarVacantes();
+        }, err => {
+          console.error('Listener vacantes error', err);
+          showToast('Error al escuchar vacantes: ' + (err && err.message ? err.message : String(err)), 'error');
         });
-        
-        totalVacantes.textContent = todasLasVacantes.length;
-        filtrarVacantes();
       } catch (error) {
         console.error('Error al cargar vacantes:', error);
         showToast('Error al cargar las vacantes. ' + error.message, 'error');
@@ -202,7 +244,7 @@
       
       noResults.style.display = 'none';
       
-      vacantes.forEach(v => {
+  vacantes.forEach(v => {
         const vacanteElement = document.createElement('div');
         vacanteElement.className = 'vacante';
         
@@ -222,6 +264,8 @@
           year: 'numeric'
         }).format(fecha);
         
+        const applied = misPostulacionesMap[v.id];
+
         vacanteElement.innerHTML = `
           <div class="vacante-header">
             <h3 class="vacante-title">${v.titulo}</h3>
@@ -238,8 +282,12 @@
           <div class="vacante-skills">
             ${v.habilidades.map(skill => `<span class="skill">${skill}</span>`).join('')}
           </div>
-
-          <button onclick="postular('${v.id}')" class="btn-postular">Postularme a esta vacante</button>
+          ${applied ? `
+            <div style="display:flex;gap:10px;align-items:center;margin-top:12px">
+              <div class="cu-badge">Postulado</div>
+              <button class="btn-outline" onclick="verMiPostulacion('${v.id}')">Ver mi postulación</button>
+            </div>
+          ` : `<button onclick="postular('${v.id}')" class="btn-postular">Postularme a esta vacante</button>`}
         `;
         
         vacantesDiv.appendChild(vacanteElement);
@@ -248,39 +296,109 @@
 
     // Apply for a vacancy
     window.postular = async (vacanteId) => {
-      try {
-        const user = auth.currentUser;
-        if (!user) {
-          showToast('Debes iniciar sesión para postularte', 'warning');
-          return;
-        }
-        
-        // Check if already applied
-        const postulacionesQuery = query(
-          collection(db, 'postulaciones'),
-          where('estudianteId', '==', user.uid),
-          where('vacanteId', '==', vacanteId)
-        );
-        
-        const postulacionesSnapshot = await getDocs(postulacionesQuery);
-        if (!postulacionesSnapshot.empty) {
-          showToast('Ya te has postulado a esta vacante', 'info');
-          return;
-        }
-        
-        // Create new application
-        await addDoc(collection(db, 'postulaciones'), {
-          vacanteId,
-          estudianteId: user.uid,
-          fecha: new Date(),
-          estado: 'pendiente'
+      // Show confirmation modal with vacancy details and company info
+      const vac = todasLasVacantes.find(x => x.id === vacanteId);
+      if (!vac) { showToast('Vacante no encontrada', 'error'); return; }
+
+      // Build modal content
+      const modalRoot = document.getElementById('cuModal');
+      modalRoot.innerHTML = '';
+      const overlay = document.createElement('div');
+      overlay.className = 'cu-modal-overlay';
+      const modal = document.createElement('div');
+      modal.className = 'cu-modal';
+
+      modal.innerHTML = `
+        <h3>Confirmar postulación</h3>
+        <div class="muted">Vacante: <strong>${vac.titulo}</strong></div>
+        <div style="margin-top:8px" class="muted">Empresa: <strong>${vac.empresaNombre || 'Empresa'}</strong></div>
+        <p style="margin-top:12px">${vac.descripcion}</p>
+          <div style="margin-top:12px">
+          <div class="muted">Selecciona tu disponibilidad para esta vacante:</div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn-outline" id="optRemoto" data-value="Remoto">Remoto</button>
+            <button class="btn-outline" id="optPresencial" data-value="Presencial">Presencial</button>
+            <button class="btn-outline" id="optHibrido" data-value="Híbrido">Híbrido</button>
+          </div>
+        </div>
+        <div class="actions" style="margin-top:12px">
+          <button class="btn-outline" id="cuCancel">Cancelar</button>
+          <button class="btn" id="cuConfirm">Confirmar postulación</button>
+        </div>
+      `;
+
+      overlay.appendChild(modal);
+      modalRoot.appendChild(overlay);
+          modalRoot.style.display = 'block';
+
+      document.getElementById('cuCancel').onclick = () => { modalRoot.style.display='none'; modalRoot.innerHTML=''; };
+      // classification selection
+      let selectedDisponibilidad = null;
+      const elRem = document.getElementById('optRemoto');
+      const elPre = document.getElementById('optPresencial');
+      const elHib = document.getElementById('optHibrido');
+      const setSelected = (val) => {
+        selectedDisponibilidad = val;
+        [elRem, elPre, elHib].forEach(b => {
+          if (!b) return;
+          if (b.dataset.value === val) { b.classList.add('btn-primary'); b.classList.remove('btn-outline'); }
+          else { b.classList.remove('btn-primary'); b.classList.add('btn-outline'); }
         });
-        
-        showToast('¡Postulación enviada con éxito!', 'success');
-      } catch (error) {
-        console.error('Error:', error);
-        showToast('Error al enviar la postulación', 'error');
-      }
+      };
+      if (elRem) elRem.onclick = () => setSelected('Remoto');
+      if (elPre) elPre.onclick = () => setSelected('Presencial');
+      if (elHib) elHib.onclick = () => setSelected('Híbrido');
+
+      document.getElementById('cuConfirm').onclick = async () => {
+        try {
+          const user = auth.currentUser;
+          if (!user) { showToast('Debes iniciar sesión', 'warning'); modalRoot.style.display='none'; return; }
+
+          // Prevent duplicate
+          const already = await getDocs(query(collection(db,'postulaciones'), where('estudianteId','==',user.uid), where('vacanteId','==',vacanteId)));
+          if (!already.empty) { showToast('Ya te has postulado a esta vacante', 'info'); modalRoot.style.display='none'; return; }
+
+          // Get user data
+          const userDocSnap = await getDocs(query(collection(db,'users'), where('email','==', user.email)));
+          const userData = userDocSnap.empty ? { name: user.email, email: user.email } : userDocSnap.docs[0].data();
+
+          // Save application with additional meta
+          // Save application with additional meta including disponibilidad/classificacion
+          await addDoc(collection(db,'postulaciones'), {
+            vacanteId,
+            vacanteTitulo: vac.titulo,
+            empresaId: vac.empresaId || null,
+            empresaNombre: vac.empresaNombre || null,
+            estudianteId: user.uid,
+            estudianteNombre: userData.name || null,
+            estudianteEmail: userData.email || user.email,
+            disponibilidad: selectedDisponibilidad || null,
+            fecha: new Date(),
+            estado: 'pendiente'
+          });
+
+          // update local map immediately for instant UI feedback
+          misPostulacionesMap[vacanteId] = {
+            vacanteId,
+            vacanteTitulo: vac.titulo,
+            estudianteId: user.uid,
+            estudianteNombre: userData.name || null,
+            estudianteEmail: userData.email || user.email,
+            disponibilidad: selectedDisponibilidad || null,
+            fecha: { toMillis: () => (new Date()).getTime() },
+            estado: 'pendiente'
+          };
+          filtrarVacantes();
+
+          showToast('¡Postulación enviada con éxito!', 'success');
+
+        } catch (err) {
+          console.error('Error al postular:', err);
+          showToast('Error al enviar la postulación', 'error');
+        } finally {
+          modalRoot.style.display='none'; modalRoot.innerHTML='';
+        }
+      };
     };
 
     // Sign out
@@ -291,6 +409,60 @@
       } catch (error) {
         console.error('Error al cerrar sesión:', error);
         showToast('Error al cerrar sesión', 'error');
+      }
+    };
+
+    // View my application for a vacancy
+    window.verMiPostulacion = (vacanteId) => {
+      const post = misPostulacionesMap[vacanteId];
+      const modalRoot = document.getElementById('cuModal');
+      modalRoot.innerHTML = '';
+      if (!post) {
+        showToast('No se encontró tu postulación para esta vacante', 'info');
+        return;
+      }
+
+      const overlay = document.createElement('div');
+      overlay.className = 'cu-modal-overlay';
+      const modal = document.createElement('div');
+      modal.className = 'cu-modal';
+      const fechaTxt = post.fecha && post.fecha.toMillis ? new Date(post.fecha.toMillis()).toLocaleString() : (post.fecha ? new Date(post.fecha).toString() : '');
+
+      modal.innerHTML = `
+        <h3>Mi postulación</h3>
+        <div class="muted">Vacante: <strong>${post.vacanteTitulo || ''}</strong></div>
+        <div style="margin-top:6px" class="muted">Estado: <strong>${post.estado || 'pendiente'}</strong></div>
+        ${post.disponibilidad ? `<div class="muted">Disponibilidad: <strong>${post.disponibilidad}</strong></div>` : ''}
+        <div class="muted" style="margin-top:8px">Enviado: ${fechaTxt}</div>
+        <div style="margin-top:12px" class="actions"><button class="btn-outline" id="closeMyPost">Cerrar</button></div>
+      `;
+
+      overlay.appendChild(modal);
+      modalRoot.appendChild(overlay);
+      modalRoot.style.display = 'block';
+
+      document.getElementById('closeMyPost').onclick = () => { modalRoot.style.display='none'; modalRoot.innerHTML=''; };
+    };
+
+    // Cambiar perfil (estudiante -> empresa)
+    window.cambiarPerfil = async () => {
+      try {
+        // show visual confirmation modal
+        window.showConfirmModal({
+          title: 'Cambiar perfil',
+          message: '¿Seguro que quieres cambiar tu perfil a Empresa?',
+          confirmText: 'Sí, cambiar',
+          cancelText: 'Cancelar'
+        }, async () => {
+          const user = auth.currentUser;
+          if (!user) return;
+          const userRef = doc(db, 'users', user.uid);
+          await updateDoc(userRef, { role: 'empresa' });
+          window.location.href = 'empresa.html';
+        });
+      } catch (err) {
+        console.error('Error cambiando perfil', err);
+        showToast('No se pudo cambiar de perfil', 'error');
       }
     };
   </script>

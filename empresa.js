@@ -93,18 +93,24 @@ async function cargarVacantes(empresaId) {
 
 // Función para eliminar una vacante
 async function eliminarVacante(vacanteId) {
-  if (!confirm('¿Estás seguro de que deseas eliminar esta vacante?')) return;
-  
-  try {
-    await deleteDoc(doc(db, 'vacantes', vacanteId));
-    showToast('Vacante eliminada exitosamente', 'success');
-    const user = auth.currentUser;
-    if (user) cargarVacantes(user.uid);
-  } catch (error) {
-    console.error('Error al eliminar la vacante:', error);
-    showToast('Error al eliminar la vacante', 'error');
+  // show visual confirmation modal
+  window.showConfirmModal({
+    title: 'Eliminar vacante',
+    message: '¿Estás seguro de que deseas eliminar esta vacante?',
+    confirmText: 'Eliminar',
+    cancelText: 'Cancelar'
+  }, async () => {
+    try {
+      await deleteDoc(doc(db, 'vacantes', vacanteId));
+      showToast('Vacante eliminada exitosamente', 'success');
+      const user = auth.currentUser;
+      if (user) cargarVacantes(user.uid);
+    } catch (error) {
+      console.error('Error al eliminar la vacante:', error);
+      showToast('Error al eliminar la vacante', 'error');
+    }
+  });
   }
-}
 
 // Ver postulaciones de una vacante
 async function verPostulaciones(vacanteId) {
